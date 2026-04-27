@@ -133,13 +133,17 @@ class Gen3AlpacaBot:
         quote_req = StockLatestQuoteRequest(symbol_or_symbols=target_symbol)
         quote = self.data_client.get_stock_latest_quote(quote_req)
         price = quote[target_symbol].ask_price
+
+        # Fee Buffer: Keep $20 untouched
+        min_reserve = self.settings.get('min_rebalance_threshold', 20.0)
+        spendable_cash = cash - min_reserve
         
-        qty = (cash * 0.998) / price
-        order_value = qty * price
-        
-        if order_value < self.settings.get('min_order_value', 20.0):
-            self.logger.info(f"Order value ${order_value:.2f} below minimum. Skipping.")
+        if spendable_cash < self.settings.get('min_order_value', 30.0):
+            self.logger.info(f"Spendable cash ${spendable_cash:.2f} (after ${min_reserve} reserve) is below MIN_ORDER_VALUE. Skipping.")
             return
+
+        qty = (spendable_cash * 0.998) / price
+        order_value = qty * price
 
         self.logger.info(f"Buying {qty:.4f} shares of {target_symbol} @ ${price:.2f}")
         if not self.dry_run:
@@ -153,6 +157,19 @@ class Gen3AlpacaBot:
         else:
             self.logger.info(f"[DRY RUN] Would submit order for {qty:.4f} shares")
 
+    def log_signal(self, asset_type, symbol, price, action="HOLD"):
+        os.makedirs("logs", exist_ok=True)
+        log_file = "logs/signal_history.csv"
+        headers = "date,signal,symbol,price,action\n"
+        
+        if not os.path.exists(log_file):
+            with open(log_file, "w") as f:
+                f.write(headers)
+        
+        line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{asset_type},{symbol},{price:.2f},{action}\n"
+        with open(log_file, "a") as f:
+            f.write(line)
+
     def run_full_cycle(self):
         self.logger.info("--- Starting Daily Cycle ---")
         if not self.check_market_open() and not self.dry_run:
@@ -160,7 +177,10 @@ class Gen3AlpacaBot:
             return
 
         df = self.sync_data()
-        target_symbol, _ = self.get_signal(df)
+        target_symbol, asset_type = self.get_signal(df)
+        
+        # Log the signal immediately
+        self.log_signal(asset_type, target_symbol, float(df.iloc[-1]['close']))
         
         self.sell_non_target(target_symbol)
         cash = self.get_buying_power()
