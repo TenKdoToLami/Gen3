@@ -1,4 +1,9 @@
 pandas
-yfinance
 numpy
+yfinance
 alpaca-trade-api
+python-dotenv
+aiohttp
+websockets
+msgpack
+setuptools

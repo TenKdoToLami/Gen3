@@ -12,8 +12,14 @@ This repository is a clean, production-focused implementation of the **Gen3 Prec
 ## 🚀 Getting Started
 
 ### 1. Install Dependencies
+On Linux servers, it is recommended to use a virtual environment:
 ```bash
-pip install pandas yfinance alpaca-trade-api python-dotenv
+# Create and activate venv
+python3 -m venv venv
+source venv/bin/activate  # On Windows use: venv\Scripts\activate
+
+# Install requirements
+pip install -r requirements.txt
 ```
 
 ### 2. Configure Environment
