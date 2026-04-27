@@ -60,8 +60,13 @@ class Gen3AlpacaBot:
         self.logger = logging.getLogger("Gen3Bot")
 
     def init_alpaca(self):
-        self.api_key = os.getenv("ALPACA_KEY")
-        self.secret_key = os.getenv("ALPACA_SECRET")
+        # Support both naming conventions (ALPACA_KEY and ALPACA_API_KEY)
+        self.api_key = os.getenv("ALPACA_KEY") or os.getenv("ALPACA_API_KEY")
+        self.secret_key = os.getenv("ALPACA_SECRET") or os.getenv("ALPACA_SECRET_KEY")
+        
+        if not self.api_key or not self.secret_key:
+            raise ValueError("CRITICAL: Alpaca API Keys not found in .env file! Check config/.env")
+
         # Trading Client
         self.trading_client = TradingClient(self.api_key, self.secret_key, paper=True)
         # Data Client
