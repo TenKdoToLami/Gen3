@@ -4,7 +4,9 @@ import json
 import logging
 import time
 from datetime import datetime
+import pandas as pd
 import alpaca_trade_api as tradeapi
+from dotenv import load_dotenv
 
 # Ensure src is on path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -20,13 +22,25 @@ class Gen3AlpacaBot:
         self.init_alpaca()
         
     def load_configs(self):
-        # 1. Load Genome
-        with open("config/v3_champion.json", "r") as f:
+        env_path = os.path.join("config", ".env")
+        load_dotenv(env_path)
+        
+        dna_path = os.getenv("STRATEGY_DNA", "config/strategy.json")
+        if not os.path.isabs(dna_path):
+            dna_path = os.path.join(os.getcwd(), dna_path)
+            
+        with open(dna_path, "r") as f:
             self.genome = json.load(f)
         
-        # 2. Load Bot Settings
-        with open("config/bot_settings.json", "r") as f:
-            self.settings = json.load(f)
+        self.settings = {
+            'symbols': {
+                "3xSPY": os.getenv("TICKER_3X", "SPXL"),
+                "CASH": os.getenv("TICKER_CASH", "SGOV")
+            },
+            'signal_ticker': os.getenv("TICKER_SIGNAL", "VOO"),
+            'min_rebalance_threshold': float(os.getenv("MIN_REMAINING_BALANCE", 20.0)),
+            'min_order_value': float(os.getenv("MIN_ORDER_VALUE", 20.0))
+        }
             
     def setup_logging(self):
         os.makedirs("logs", exist_ok=True)
@@ -34,164 +48,127 @@ class Gen3AlpacaBot:
             level=logging.INFO,
             format='%(asctime)s [%(levelname)s] %(message)s',
             handlers=[
-                logging.FileHandler(self.settings.get("log_file", "logs/bot_execution.log")),
+                logging.FileHandler("logs/bot_execution.log"),
                 logging.StreamHandler(sys.stdout)
             ]
         )
         self.logger = logging.getLogger("Gen3Bot")
 
     def init_alpaca(self):
-        self.api_key = os.getenv("ALPACA_API_KEY")
-        self.secret_key = os.getenv("ALPACA_SECRET_KEY")
+        self.api_key = os.getenv("ALPACA_KEY")
+        self.secret_key = os.getenv("ALPACA_SECRET")
         self.base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
-        
-        if not self.api_key or not self.secret_key:
-            self.logger.error("Alpaca credentials missing in environment variables!")
-            sys.exit(1)
-            
         self.api = tradeapi.REST(self.api_key, self.secret_key, self.base_url, api_version='v2')
 
-    def get_market_data(self):
-        self.logger.info("Syncing market data...")
+    # --- STEP 1: Market Status ---
+    def check_market_open(self):
+        clock = self.api.get_clock()
+        status = "OPEN" if clock.is_open else "CLOSED"
+        self.logger.info(f"Market is {status}. Next Open: {clock.next_open} | Next Close: {clock.next_close}")
+        return clock.is_open
+
+    # --- STEP 2: Data Pull (YF + FED) ---
+    def sync_data(self):
+        self.logger.info("Syncing historical data from YFinance and FRED...")
         df = update_market_data()
+        last_date = pd.to_datetime(df.index[-1]).date()
+        self.logger.info(f"Sync complete. Latest date in DB: {last_date}")
+        return df
+
+    # --- STEP 3: Signal Calculation ---
+    def get_signal(self, df):
+        # Fetch current signal price (VOO/SPY)
+        ticker = self.settings['signal_ticker']
+        last_quote = self.api.get_latest_quote(ticker)
+        curr_price = last_quote.ap
         
-        # Fetch current SPY price from Alpaca
-        spy_last_quote = self.api.get_latest_quote("SPY")
-        current_spy_price = spy_last_quote.ap # Ask price
-        
-        latest_data = df.iloc[-1].to_dict()
-        # Create a "today" entry with current SPY price and latest VIX/YC
+        # Prepare today's data row
+        latest_row = df.iloc[-1].to_dict()
         today_data = {
-            'close': current_spy_price,
-            'high': current_spy_price, # Simplified
-            'low': current_spy_price,  # Simplified
-            'vix': latest_data['vix'],
-            'yield_curve': latest_data['yield_curve']
+            'close': curr_price, 'high': curr_price, 'low': curr_price,
+            'vix': latest_row['vix'], 'yield_curve': latest_row['yield_curve']
         }
         
-        # History for warmup
-        history = []
-        for _, row in df.tail(250).iterrows():
-            history.append(row.to_dict())
-            
-        return history, today_data
-
-    def calculate_signal(self, history, today_data):
-        self.logger.info("Calculating strategy signal...")
+        # Warmup and Decide (using full history for EMA stability)
         strategy = V3Strategy(self.genome)
-        
-        # Warmup
-        for data in history:
-            strategy.on_data(data)
+        for _, row in df.tail(1000).iterrows():
+            strategy.on_data(row.to_dict())
             
-        # Get final signal
         allocation = strategy.on_data(today_data)
-        target_asset_type = list(allocation.keys())[0] # "3xSPY" or "CASH"
-        target_symbol = self.settings['symbols'][target_asset_type]
+        asset_type = list(allocation.keys())[0] # "3xSPY" or "CASH"
+        target_symbol = self.settings['symbols'][asset_type]
         
-        # Log indicator scores (this requires a small hack or manual calculation since V3Strategy doesn't expose them easily)
-        # For now, we'll log the final verdict and the inputs
-        self.logger.info(f"Inputs: SPY=${today_data['close']:.2f}, VIX={today_data['vix']:.2f}, YC={today_data['yield_curve']:.3f}")
-        self.logger.info(f"Target Allocation: {target_asset_type} ({target_symbol})")
-        
-        return target_symbol, target_asset_type
+        self.logger.info(f"Signal Generated: {asset_type} ({target_symbol}) @ ${curr_price:.2f}")
+        return target_symbol, asset_type
 
-    def execute_trade(self, target_symbol, target_asset_type):
-        self.logger.info("Checking current positions...")
-        account = self.api.get_account()
+    # --- STEP 4: Sell Position ---
+    def sell_non_target(self, target_symbol):
         positions = self.api.list_positions()
-        
-        current_symbol = None
-        current_qty = 0
-        
         for pos in positions:
-            if pos.symbol in self.settings['symbols'].values():
-                current_symbol = pos.symbol
-                current_qty = float(pos.qty)
-                break
-        
-        self.logger.info(f"Current Position: {current_symbol} (Qty: {current_qty})")
-        self.logger.info(f"Account Balance: ${account.equity}")
-        
-        if current_symbol != target_symbol:
-            self.logger.info(f"Rebalancing: {current_symbol} -> {target_symbol}")
-            
-            # 1. Sell current if exists
-            if current_symbol:
+            if pos.symbol != target_symbol and pos.symbol in self.settings['symbols'].values():
+                self.logger.info(f"Selling position in {pos.symbol} (Qty: {pos.qty})")
                 if not self.dry_run:
-                    self.api.close_position(current_symbol)
-                    self.logger.info(f"Closed position in {current_symbol}")
-                    # Wait for settlement/order fill
-                    time.sleep(5)
+                    self.api.close_position(pos.symbol)
+                    time.sleep(5) # Wait for fill
                 else:
-                    self.logger.info(f"[DRY RUN] Would close position in {current_symbol}")
+                    self.logger.info(f"[DRY RUN] Would sell {pos.symbol}")
 
-            # Log balance after sell
-            account = self.api.get_account()
-            self.logger.info(f"Balance after sell: ${account.cash}")
+    # --- STEP 5: Check Balance ---
+    def get_buying_power(self):
+        account = self.api.get_account()
+        cash = float(account.cash)
+        self.logger.info(f"Available Cash: ${cash:.2f} | Total Equity: ${account.equity}")
+        return cash
 
-            # 2. Buy target
-            if not self.dry_run:
-                cash = float(account.cash)
-                # Reserve 1% for slippage/fees if necessary, though paper trading is free
-                buy_power = cash * 0.99 
-                last_price = self.api.get_latest_quote(target_symbol).ap
-                qty = int(buy_power / last_price)
-                
-                if qty > 0:
-                    self.api.submit_order(
-                        symbol=target_symbol,
-                        qty=qty,
-                        side='buy',
-                        type='market',
-                        time_in_force='day'
-                    )
-                    self.logger.info(f"Bought {qty} shares of {target_symbol}")
-                else:
-                    self.logger.warning("Insufficient funds to buy even 1 share.")
-            else:
-                self.logger.info(f"[DRY RUN] Would buy {target_symbol} with available cash")
-                
-        else:
-            # Same symbol - check for unused balance
-            cash = float(account.cash)
-            threshold = self.settings.get("min_rebalance_threshold", 100.0)
-            
-            self.logger.info(f"Already in target asset. Current cash: ${cash:.2f}")
-            
-            if cash > threshold:
-                self.logger.info(f"Cash exceeds threshold (${threshold}). Buying more {target_symbol}...")
-                if not self.dry_run:
-                    last_price = self.api.get_latest_quote(target_symbol).ap
-                    qty = int((cash * 0.99) / last_price)
-                    if qty > 0:
-                        self.api.submit_order(
-                            symbol=target_symbol,
-                            qty=qty,
-                            side='buy',
-                            type='market',
-                            time_in_force='day'
-                        )
-                        self.logger.info(f"Added {qty} shares to {target_symbol}")
-                else:
-                    self.logger.info(f"[DRY RUN] Would add shares to {target_symbol}")
-            else:
-                self.logger.info("Unused balance below threshold. No additional action taken.")
-
-    def run(self):
+    # --- STEP 6: Buy Position ---
+    def buy_target(self, target_symbol, cash):
+        # Check if we already have it
         try:
-            history, today_data = self.get_market_data()
-            target_symbol, target_asset_type = self.calculate_signal(history, today_data)
-            self.execute_trade(target_symbol, target_asset_type)
-            self.logger.info("Daily routine completed successfully.")
-        except Exception as e:
-            self.logger.exception(f"Error during bot execution: {str(e)}")
+            pos = self.api.get_position(target_symbol)
+            curr_qty = float(pos.qty)
+        except:
+            curr_qty = 0
+            
+        threshold = self.settings['min_rebalance_threshold']
+        if cash < threshold:
+            self.logger.info(f"Remaining cash ${cash:.2f} is below threshold ${threshold}. No trade needed.")
+            return
+
+        last_quote = self.api.get_latest_quote(target_symbol)
+        price = last_quote.ap
+        
+        # Calculate maximum possible qty (using 99.8% of cash to allow for minor price movement)
+        qty = (cash * 0.998) / price
+        order_value = qty * price
+        
+        if order_value < self.settings.get('min_order_value', 20.0):
+            self.logger.info(f"Calculated buy order value ${order_value:.2f} is below MIN_ORDER_VALUE. Skipping.")
+            return
+
+        self.logger.info(f"Buying {qty:.4f} shares of {target_symbol} @ ${price:.2f} (Value: ${order_value:.2f})")
+        if not self.dry_run:
+            self.api.submit_order(
+                symbol=target_symbol, qty=qty, side='buy',
+                type='market', time_in_force='day'
+            )
+        else:
+            self.logger.info(f"[DRY RUN] Would submit fractional buy order for {qty:.4f} shares")
+
+    def run_full_cycle(self):
+        self.logger.info("--- Starting Daily Cycle ---")
+        if not self.check_market_open() and not self.dry_run:
+            self.logger.warning("Market is closed. Skipping execution.")
+            return
+
+        df = self.sync_data()
+        target_symbol, _ = self.get_signal(df)
+        
+        self.sell_non_target(target_symbol)
+        cash = self.get_buying_power()
+        self.buy_target(target_symbol, cash)
+        
+        self.logger.info("--- Cycle Completed ---")
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description='Gen3 Alpaca Trading Bot')
-    parser.add_argument('--dry-run', action='store_true', help='Calculate signal but do not execute trades')
-    args = parser.parse_args()
-    
-    bot = Gen3AlpacaBot(dry_run=args.dry_run)
-    bot.run()
+    bot = Gen3AlpacaBot(dry_run="--dry-run" in sys.argv)
+    bot.run_full_cycle()

@@ -17,9 +17,14 @@ pip install pandas yfinance alpaca-trade-api python-dotenv
 ```
 
 ### 2. Configure Environment
-Copy `.env.example` to `.env` and fill in your Alpaca keys:
+Create a `.env` file inside the `config/` directory and fill in your Alpaca keys:
 ```bash
-cp .env.example .env
+# Example content for config/.env
+ALPACA_KEY=your_key
+ALPACA_SECRET=your_secret
+TICKER_3X=SPXL
+TICKER_SIGNAL=VOO
+STRATEGY_DNA=config/v3_champion.json
 ```
 
 ### 2. Generate Today's Signal
@@ -39,12 +44,18 @@ To see the full institutional-grade historical backtest (1993 - Present):
 python scripts/full_backtest.py
 ```
 
-### 4. Live (Paper) Trading
-To execute trades automatically on Alpaca:
+### 🧪 Command Center (control.py)
+The root `control.py` script allows you to run specific parts of the bot using simple commands.
+*   `python control.py status` : Check if the market is open.
+*   `python control.py sync` : Update historical data (YFinance/FRED).
+*   `python control.py signal` : Calculate today's trading signal.
+*   `python control.py balance` : Check account cash and equity.
+*   `python control.py rebalance` : Run the **Full Cycle** (Sync -> Signal -> Sell -> Buy).
+
+**Safety First**: All commands run in **Dry-Run** mode by default. Add `--live` to execute real orders.
 ```bash
-python src/alpaca_bot.py --dry-run
+python control.py rebalance --live
 ```
-Remove `--dry-run` to execute real orders.
 
 ## 🧠 Strategy Logic (Gen 3)
 The bot uses a **Dual-Brain Architecture**:
