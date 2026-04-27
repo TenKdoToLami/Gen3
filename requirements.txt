@@ -1,9 +1,5 @@
 pandas
 numpy
 yfinance
-alpaca-trade-api
+alpaca-py
 python-dotenv
-aiohttp
-websockets
-msgpack
-setuptools
