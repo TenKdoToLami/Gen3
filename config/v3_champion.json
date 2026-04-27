@@ -1,0 +1,85 @@
+{
+  "panic": {
+    "w": {
+      "sma": 1.69,
+      "ema": -3.53,
+      "rsi": -1.16,
+      "macd": 2.84,
+      "adx": 1.38,
+      "trix": 0.99,
+      "slope": 2.34,
+      "vol": -3.3,
+      "atr": -3.52,
+      "vix": -2.19,
+      "yc": 2.44
+    },
+    "a": {
+      "sma": true,
+      "ema": true,
+      "rsi": false,
+      "macd": true,
+      "adx": true,
+      "trix": false,
+      "slope": false,
+      "vol": true,
+      "atr": false,
+      "vix": false,
+      "yc": true
+    },
+    "t": 1.28,
+    "lookbacks": {
+      "sma": 167,
+      "ema": 148,
+      "rsi": 20,
+      "macd_f": 20,
+      "macd_s": 39,
+      "adx": 33,
+      "trix": 26,
+      "slope": 5,
+      "vol": 28,
+      "atr": 31
+    }
+  },
+  "bull": {
+    "w": {
+      "sma": 3.55,
+      "ema": -0.24,
+      "rsi": 1.92,
+      "macd": -3.12,
+      "adx": 0.16,
+      "trix": 1.17,
+      "slope": -3.82,
+      "vol": 3.26,
+      "atr": 1.02,
+      "vix": -0.95,
+      "yc": 2.36
+    },
+    "a": {
+      "sma": true,
+      "ema": false,
+      "rsi": false,
+      "macd": false,
+      "adx": false,
+      "trix": true,
+      "slope": true,
+      "vol": true,
+      "atr": true,
+      "vix": false,
+      "yc": false
+    },
+    "t": 0.76,
+    "lookbacks": {
+      "sma": 20,
+      "ema": 120,
+      "rsi": 45,
+      "macd_f": 23,
+      "macd_s": 36,
+      "adx": 11,
+      "trix": 47,
+      "slope": 6,
+      "vol": 29,
+      "atr": 8
+    }
+  },
+  "lock_days": 6
+}
