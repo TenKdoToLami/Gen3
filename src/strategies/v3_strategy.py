@@ -6,6 +6,7 @@ class V3Strategy:
     """
     Precision Binary Strategy (3xSPY vs CASH).
     The production version of the Gen3 bot.
+    Includes lock_days state machine to prevent whipsaw.
     """
     def __init__(self, genome):
         self.genome = genome
@@ -17,6 +18,7 @@ class V3Strategy:
         self.lows = []
         self.brain_states = {'panic': {}, 'bull': {}}
         self.last_holdings = None
+        self.lock_counter = 0
 
     def _get_brain_score(self, brain_key, price_data):
         spy_price = self.prices[-1]
@@ -74,15 +76,29 @@ class V3Strategy:
         self.highs.append(price_data['high'])
         self.lows.append(price_data['low'])
 
-        if len(self.prices) < 200: # Warmup
-            return {"CASH": 1.0}
+        if self.lock_counter > 0:
+            self.lock_counter -= 1
 
+        # Calculate both brain scores to keep internal indicator states updated
         score_panic = self._get_brain_score('panic', price_data)
         score_bull = self._get_brain_score('bull', price_data)
 
+        # Base Decision
         if score_panic > self.genome['panic']['t']:
-            return {"CASH": 1.0}
+            new_holdings = {"CASH": 1.0}
         elif score_bull > self.genome['bull']['t']:
-            return {"3xSPY": 1.0}
-        
-        return {"CASH": 1.0}
+            new_holdings = {"3xSPY": 1.0}
+        else:
+            new_holdings = {"CASH": 1.0}
+
+        # State Machine / Lock logic
+        if new_holdings != self.last_holdings:
+            # Panic override: If signal is CASH due to Panic, we exit immediately ignoring the lock
+            is_panic = (new_holdings.get("CASH") == 1.0 and score_panic > self.genome['panic']['t'])
+            
+            if self.lock_counter == 0 or is_panic:
+                self.last_holdings = new_holdings
+                self.lock_counter = max(0, int(round(self.genome.get('lock_days', 0))))
+                return new_holdings
+            
+        return self.last_holdings or {"CASH": 1.0}

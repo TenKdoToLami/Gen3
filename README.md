@@ -13,7 +13,13 @@ This repository is a clean, production-focused implementation of the **Gen3 Prec
 
 ### 1. Install Dependencies
 ```bash
-pip install pandas yfinance
+pip install pandas yfinance alpaca-trade-api python-dotenv
+```
+
+### 2. Configure Environment
+Copy `.env.example` to `.env` and fill in your Alpaca keys:
+```bash
+cp .env.example .env
 ```
 
 ### 2. Generate Today's Signal
@@ -28,10 +34,17 @@ This script will:
 4. Log the signal to `logs/signal_history.csv`.
 
 ### 3. Verify the Strategy
-To see the full historical backtest of your active champion DNA:
+To see the full institutional-grade historical backtest (1993 - Present):
 ```bash
-python scripts/verify_champion.py
+python scripts/full_backtest.py
 ```
+
+### 4. Live (Paper) Trading
+To execute trades automatically on Alpaca:
+```bash
+python src/alpaca_bot.py --dry-run
+```
+Remove `--dry-run` to execute real orders.
 
 ## 🧠 Strategy Logic (Gen 3)
 The bot uses a **Dual-Brain Architecture**:

@@ -56,7 +56,10 @@ def update_market_data(force_full=False):
     df = df.dropna(subset=['close'])
 
     # 4. Save and Prune
+    if latest_date_str:
+        df = df[df.index > pd.to_datetime(latest_date_str)]
+        
     db.save_data(df)
     db.prune_old_data(keep_days=1000)
     
-    return db.get_history(limit=500)
+    return db.get_history(limit=1000)

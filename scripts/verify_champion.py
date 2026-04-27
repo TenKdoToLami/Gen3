@@ -67,7 +67,7 @@ def main():
     cagr, mdd, sharpe = calculate_metrics(np.array(values))
     spy_cagr, spy_mdd, spy_sharpe = calculate_metrics(np.array(spy_values))
     
-    print(f"\nRESULTS (1993 - Present):")
+    print(f"\nRESULTS (Recent History):")
     print(f"METRIC      |  GEN3 V3    |  SPY (1x)")
     print(f"-----------------------------------------")
     print(f"CAGR        |  {cagr*100:7.2f}%  |  {spy_cagr*100:7.2f}%")
