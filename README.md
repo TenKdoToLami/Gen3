@@ -52,10 +52,16 @@ The root `control.py` script allows you to run specific parts of the bot using s
 *   `python control.py balance` : Check account cash and equity.
 *   `python control.py rebalance` : Run the **Full Cycle** (Sync -> Signal -> Sell -> Buy).
 
-**Safety First**: All commands run in **Dry-Run** mode by default. Add `--live` to execute real orders.
+### 🤖 Automation (Linux/VPS)
+To automate the bot every weekday at 21:50 Prague time (10 minutes before NY close):
 ```bash
-python control.py rebalance --live
+# Add to crontab
+python scripts/manage_cron.py add
+
+# Remove from crontab
+python scripts/manage_cron.py remove
 ```
+You can check the logs for the automated runs in `logs/cron.log`.
 
 ## 🧠 Strategy Logic (Gen 3)
 The bot uses a **Dual-Brain Architecture**:
